@@ -1,0 +1,14 @@
+# Local Python virtual environment
+.venv/
+
+# Generated Python files
+__pycache__/
+*.pyc
+
+# Local environment settings, potentially containing secrets
+.env
+.env.*
+
+# macOS folder metadata
+.DS_Store
+
