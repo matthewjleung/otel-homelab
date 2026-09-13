@@ -1,8 +1,11 @@
+import logging
 from fastapi import FastAPI
 from app.telemetry import configure_telemetry
 
 app = FastAPI()
 configure_telemetry(app)
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 @app.get("/health")
@@ -12,6 +15,7 @@ def health():
 
 @app.get("/hello")
 def hello():
+    logger.info("hello endpoint called")
     return {"message": "Hello from my homelab"}
 
 
