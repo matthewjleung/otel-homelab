@@ -44,7 +44,14 @@ def configure_telemetry(app):
         level=logging.INFO,
         logger_provider=logger_provider,
     )
-    logging.getLogger().addHandler(log_handler)
+
+    logging.getLogger("app").addHandler(log_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(
+        logging.Formatter("%(levelname)s %(name)s: %(message)s")
+    )
+    logging.getLogger().addHandler(console_handler)
     logging.getLogger().setLevel(logging.INFO)
 
     FastAPIInstrumentor.instrument_app(
