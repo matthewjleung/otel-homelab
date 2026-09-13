@@ -376,3 +376,29 @@ Application logs go to both OTLP and the console.
 Exporter diagnostics go to the console, so they remain accessible
 when the Collector is unavailable.
 
+## Architecture diagram
+
+```mermaid
+flowchart LR
+client["Mac client / curl"]
+port["Docker port mapping<br/>127.0.0.1:8000 -> 8000"]
+
+subgraph network["Docker network: otel-net"]
+api["otel-api<br/>FastAPI + Uvicorn"]
+sdk["OpenTelemetry SDK<br/>FastAPI instrumentation"]
+collector["otel-collector<br/>OTLP receiver :4318"]
+batch["Batch processor"]
+debug["Debug exporter<br/>Collector container logs"]
+api --> sdk
+sdk -->|OTLP HTTP /v1/traces| collector
+sdk -->|OTLP HTTP /v1/metrics| collector
+sdk -->|OTLP HTTP /v1/logs| collector
+collector --> batch --> debug
+end
+
+client -->|HTTP request| port
+port --> api
+api -->|HTTP response| port
+port --> client
+api --> appLogs["Console handler<br/>API container logs"]
+
