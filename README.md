@@ -4,10 +4,21 @@ A small FastAPI application for learning Docker and OpenTelemetry.
 
 ## Current state
 
-The containerised API exports traces over OTLP HTTP to an OpenTelemetry
-Collector. The Collector prints received spans using its debug exporter.
+The containerised FastAPI API exports traces, metrics, and logs over
+OTLP HTTP to an OpenTelemetry Collector.
 
-Metrics and log export are planned.
+Application logs include trace and span IDs in their OTLP records.
+Application messages and exporter diagnostics are also visible locally
+through docker logs otel-api.
+
+The /simulate endpoint generates controlled latency and HTTP 503 failures.
+Collector outage testing confirmed that the API continues serving requests,
+exporter failures appear in local logs, and fresh telemetry resumes after
+the Collector restarts.
+
+The Collector uses a debug exporter for terminal inspection.
+No searchable telemetry storage or dashboard is configured.
+
 
 ## Architecture
 
@@ -270,4 +281,98 @@ Keep credentials and secrets out of source code and Git.
 .gitignore and .dockerignore.
 
 The current setup requires no credentials.
+
+## Simulate latency and failures
+
+GET /simulate accepts two optional query parameters:
+
+- delay_ms: integer delay in milliseconds, default 0, clamped to 0–5000.
+- fail: boolean, default false. When true, returns HTTP 503.
+
+Measure a successful slow request:
+
+```bash
+curl -i \
+-w '\nTotal time: %{time_total} seconds\n' \
+"http://127.0.0.1:8000/simulate?delay_ms=750"
+```
+
+Expect HTTP 200 and approximately 0.75 seconds or longer.
+
+Measure a slow failed request:
+
+```bash
+curl -i \
+-w '\nTotal time: %{time_total} seconds\n' \
+"http://127.0.0.1:8000/simulate?delay_ms=300&fail=true"
+```
+
+Expect HTTP 503 with {"detail":"simulated failure"}.
+The URL is quoted because & has special meaning in the shell.
+
+The failed request produces:
+
+- A WARN log containing "Simulated failure after 300 ms".
+- A server span with status Error and HTTP status 503.
+- Duration and response-size histogram points labelled with status 503.
+
+Inspect the warning and its trace context:
+
+```bash
+docker logs --since 2m otel-collector 2>&1 |
+grep -F -B 10 -A 10 'Simulated failure after 300 ms'
+```
+
+Allow about 10 seconds after the request for export.
+Use the log's trace and span IDs to find the corresponding request span.
+
+
+## Troubleshoot a Collector outage
+
+Stop the Collector, then request the API:
+
+```bash
+docker stop otel-collector
+curl -i http://127.0.0.1:8000/hello
+```
+
+The API should still return HTTP 200 because telemetry export runs
+in the background.
+
+After about 10 seconds, inspect exporter diagnostics:
+
+```bash
+docker logs --tail 50 otel-api
+```
+
+During our test, exporters reported name-resolution failures for
+otel-collector, retried, and eventually reported failed batches.
+
+Restore the Collector:
+
+```bash
+docker start otel-collector
+```
+
+Send a fresh request:
+
+```bash
+curl -i http://127.0.0.1:8000/hello
+```
+
+After about 10 seconds, confirm the new log arrived:
+
+```bash
+docker logs --since 2m otel-collector 2>&1 |
+grep -F -B 10 -A 10 'hello endpoint called'
+```
+
+Check the log timestamp against the new request.
+
+Successful recovery proves fresh telemetry delivery resumes.
+It does not prove all telemetry from the outage was retained.
+
+Application logs go to both OTLP and the console.
+Exporter diagnostics go to the console, so they remain accessible
+when the Collector is unavailable.
 
