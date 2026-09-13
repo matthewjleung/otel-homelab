@@ -1,8 +1,8 @@
 from fastapi import FastAPI
-from app.telemetry import configure_tracing
+from app.telemetry import configure_telemetry
 
 app = FastAPI()
-configure_tracing(app)
+configure_telemetry(app)
 
 
 @app.get("/health")
