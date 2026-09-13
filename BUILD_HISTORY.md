@@ -229,23 +229,3 @@ and telemetry path are separate.
 The current Collector only prints telemetry. It has no durable backend,
 query interface, dashboard, alerting, authentication, TLS, or Kubernetes
 deployment.
-
-The next useful milestones are:
-
-1. Deploy the API and Collector with Kubernetes manifests.
-2. Add persistent trace, metric, and log backends.
-3. Add Grafana dashboards and alerts.
-4. Add health probes and a reproducible deployment workflow.
-
-## Interview prompts
-
-Practice answering these without looking at the implementation:
-
-1. Why use a Collector instead of exporting directly to a backend?
-2. How does Docker DNS let the API resolve `otel-collector`?
-3. What is the difference between a trace, span, metric, and log?
-4. How did you prove that logs and spans were correlated?
-5. Why did the API remain available when the Collector was stopped?
-6. Why did rebuilding the image require recreating the API container?
-7. What did the console-handler detour teach you?
-8. What would you add before calling this production-ready?
