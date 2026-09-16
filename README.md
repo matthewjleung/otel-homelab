@@ -1,6 +1,29 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+## Level 2.2.3 — Loki
+
+  Loki receives application logs through the Collector:
+
+  API → OTLP/HTTP → Collector → Loki /otlp/v1/logs
+
+  The Collector uses the otlp_http/loki exporter and continues sending
+  logs to its debug exporter.
+
+  Loki's HTTP API is available at localhost:3100. Local storage is
+  configured under /loki using the loki-data named volume.
+  Persistence across container recreation has not yet been tested.
+
+  Verified:
+  - A /hello request produced a queryable INFO log.
+  - A controlled /simulate failure produced a queryable WARN log.
+  - Filtering by trace_id retrieved the specific failed request's log.
+  - Trace and span IDs were preserved for correlation with Tempo.
+
+  The service.name resource attribute becomes the service_name index
+  label. Trace IDs remain structured metadata, not index labels.
+  This pipeline collects application OTLP logs, not all container stdout.
+
 ## Level 2.2.2 — Tempo
 
   Tempo stores traces forwarded by the Collector:

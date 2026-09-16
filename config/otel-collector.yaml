@@ -14,6 +14,8 @@ exporters:
     endpoint: "0.0.0.0:8889"
   otlp_http/tempo:
     endpoint: "http://tempo:4318"
+  otlp_http/loki:
+    endpoint: "http://loki:3100/otlp"
 
 service:
   pipelines:
@@ -28,4 +30,4 @@ service:
     logs:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug, otlp_http/loki]
