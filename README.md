@@ -1,6 +1,42 @@
 # OpenTelemetry Homelab
-
 A small FastAPI application for learning Docker and OpenTelemetry.
+
+
+## Level 2.1 — Docker Compose
+
+  The API and OpenTelemetry Collector are now managed through `compose.yaml`.
+  Use the Compose commands below for the current deployment. The manual Docker
+  instructions later in this document describe the Level 1 setup.
+
+  Run from the project directory:
+
+  ```bash
+  docker compose up -d
+  docker compose ps
+  curl -i http://localhost:8000/health
+  curl -i http://localhost:8000/hello
+  docker compose logs --since 2m otel-collector
+  ```
+
+  Expected results: the API reports healthy, the Collector reports running,
+  both endpoints return HTTP 200, and traces, metrics, and application logs
+  appear in Collector output.
+
+  Compose creates a shared network. The API exports OTLP/HTTP telemetry to
+  http://otel-collector:4318 using service-name discovery. Only API port 8000
+  is published to the Mac, on 127.0.0.1.
+
+  The API health check calls /health inside its container every 30 seconds.
+  It checks API responsiveness, not telemetry delivery, and does not
+  automatically restart an unhealthy container.
+
+  The Collector still uses the detailed debug exporter. Queryable telemetry
+  backends will be added in 2.2. The original Level 1 containers remain stopped;
+  do not start the old API alongside Compose because both use host port 8000.
+
+
+
+
 
 ## Current state
 
