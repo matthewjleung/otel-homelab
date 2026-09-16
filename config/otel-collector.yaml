@@ -8,19 +8,19 @@ processors:
   batch: {}
 
 exporters:
-    debug:
-      verbosity: detailed
-    prometheus:
-      endpoint: "0.0.0.0:8889"
-
-
+  debug:
+    verbosity: detailed
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+  otlp_http/tempo:
+    endpoint: "http://tempo:4318"
 
 service:
   pipelines:
     traces:
       receivers: [otlp]
       processors: [batch]
-      exporters: [debug]
+      exporters: [debug, otlp_http/tempo]
     metrics:
       receivers: [otlp]
       processors: [batch]
@@ -29,5 +29,3 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [debug]
-
-

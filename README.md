@@ -1,6 +1,27 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+## Level 2.2.2 — Tempo
+
+  Tempo stores traces forwarded by the Collector:
+
+  API → OTLP/HTTP :4318 → Collector → OTLP/HTTP :4318 → Tempo
+
+  Tempo exposes its query API on `localhost:3200`. Trace data is stored under
+  `/var/tempo` in the `tempo-data` Docker volume.
+
+  Verified with Tempo's trace-by-ID API:
+
+  - A controlled failed request returned HTTP 503 and was retrieved successfully.
+  - A healthy `/simulate` request returned HTTP 200 and was retrieved successfully.
+  - A slow `/simulate?delay_ms=750` request returned HTTP 200 and showed roughly
+    750 ms span duration.
+  - Server spans and their child response spans were present.
+  - Trace IDs linked all spans belonging to one request.
+
+  The Collector continues to print all signals through its debug exporter, while
+  traces are also sent to Tempo through the `otlp_http/tempo` exporter.
+
 ## Level 2.2.1 — Prometheus
 
   Prometheus stores application metrics received through the Collector:
