@@ -1,6 +1,28 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+
+## Level 2.2.4–2.2.5 — Persistence and storage checkpoint
+
+  Verified historical telemetry before and after:
+  - docker compose down --timeout 60
+  - docker compose up -d
+
+  All three backends retained the test data:
+  - Prometheus: failed /simulate request count remained 4 when queried
+    at the fixed timestamp 1789573980.
+  - Tempo: trace 55556666777788889999aaaabbbbcccc remained retrievable,
+    with HTTP 503 and approximately 322 ms server-span duration.
+  - Loki: the original "Simulated failure after 300 ms" log remained
+    retrievable with its matching trace ID.
+
+  Named volumes survive docker compose down.
+  docker compose down -v deletes the named volumes and their stored data.
+  The destructive -v option was not tested.
+
+  The API's in-memory counters reset on recreation; Prometheus retains
+  previously collected historical samples independently.
+
 ## Level 2.2.3 — Loki
 
   Loki receives application logs through the Collector:
@@ -12,7 +34,7 @@ A small FastAPI application for learning Docker and OpenTelemetry.
 
   Loki's HTTP API is available at localhost:3100. Local storage is
   configured under /loki using the loki-data named volume.
-  Persistence across container recreation has not yet been tested.
+  Persistence across container recreation verified for Prometheus, Tempo and Loki.
 
   Verified:
   - A /hello request produced a queryable INFO log.
