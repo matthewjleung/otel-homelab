@@ -1,6 +1,42 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+## Level 2.2.1 — Prometheus
+
+  Prometheus stores application metrics received through the Collector:
+
+  API → OTLP/HTTP :4318 → Collector → /metrics :8889 ← Prometheus scrape
+
+  The API exports metrics every five seconds. Prometheus scrapes the
+  Collector every 15 seconds and stores samples in the prometheus-data
+  named volume, mounted at /prometheus.
+
+  Open http://localhost:9090 to query metrics.
+  The target at http://localhost:9090/targets should show UP.
+
+  Verified:
+  - Successful /hello requests and intentional /simulate HTTP 503 failures.
+  - Request counts labelled by http_target and http_status_code.
+  - Request rates calculated with rate().
+  - Existing duration histograms are available for latency queries.
+
+  Request rate by route and status, excluding health probes:
+
+  ```promql
+  sum by (http_target, http_status_code) (
+    rate(http_server_duration_milliseconds_count{
+      job="otel-collector",
+      exported_job="otel-homelab-api",
+      http_target!="/health"
+    }[2m])
+  )
+  ```
+
+  A zero rate means no increase during the window; it does not mean
+  the cumulative request count is zero.
+
+  Traces and logs still use the Collector debug exporter.
+
 
 ## Level 2.1 — Docker Compose
 
@@ -30,11 +66,9 @@ A small FastAPI application for learning Docker and OpenTelemetry.
   It checks API responsiveness, not telemetry delivery, and does not
   automatically restart an unhealthy container.
 
-  The Collector still uses the detailed debug exporter. Queryable telemetry
-  backends will be added in 2.2. The original Level 1 containers remain stopped;
+  The Collector still uses the detailed debug exporter. Metrics are now stored in Prometheus.
+  Traces and logs are next. The original Level 1 containers remain stopped;
   do not start the old API alongside Compose because both use host port 8000.
-
-
 
 
 
