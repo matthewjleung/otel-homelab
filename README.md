@@ -25,7 +25,32 @@ A small FastAPI application for learning Docker and OpenTelemetry.
   provisioned from Git. Recreate them through the UI if that volume
   is deleted. No passwords are stored in this repository.
 
-  The RED dashboard has not yet been built.
+ ### RED dashboard and investigation
+
+  The Homelab RED dashboard contains:
+  - Request rate: application requests per second.
+  - Error rate: percentage of requests returning HTTP 5xx.
+  - P95 latency: estimated 95th-percentile duration in milliseconds.
+
+  All panels exclude /health and use a rolling two-minute window.
+  Healthy, failed, slow, and slow-failed traffic were tested.
+
+  P95 is estimated from histogram buckets. Injecting 750 ms latency
+  produced approximately 988 ms estimated P95, while individual
+  traces showed durations closer to the injected delay.
+
+  Verified investigation:
+  RED degradation → Tempo trace → server span → correlated Loki log.
+
+  Example trace: 9dfc2ae775afec75b2ddc7c973b1da99
+  Server-span duration: 762.3 ms
+  HTTP status: 503
+  Correlated WARN log: "Simulated failure after 750 ms"
+
+  Dashboard export: dashboards/homelab-red.json
+  To restore, use Grafana's dashboard Import option, upload this file,
+  and select the configured Prometheus data source when prompted.
+  The export contains dashboard configuration, not telemetry history.
 
 ## Level 2.2.4–2.2.5 — Persistence and storage checkpoint
 
