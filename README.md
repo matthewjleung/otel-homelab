@@ -1,6 +1,31 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+## Level 2.3 — Grafana setup and data sources
+
+  Grafana runs through Compose at http://localhost:3000.
+  Its settings and dashboards are stored in the grafana-data named
+  volume, mounted at /var/lib/grafana.
+
+  Data sources were configured manually through Grafana:
+  - Prometheus: http://prometheus:9090 — no authentication; scrape
+    interval setting 15s.
+  - Tempo: http://tempo:3200 — no authentication.
+  - Loki: http://loki:3100 — no authentication.
+
+  These addresses use Compose service discovery from Grafana's
+  container. They are query endpoints, not OTLP ingestion endpoints.
+
+  Verified in Explore:
+  - Prometheus returned the /hello HTTP 200 request count.
+  - Loki displayed the "hello endpoint called" application log.
+  - The log's trace ID retrieved the matching GET /hello trace in Tempo.
+
+  Data-source settings are persisted in Grafana's volume, not
+  provisioned from Git. Recreate them through the UI if that volume
+  is deleted. No passwords are stored in this repository.
+
+  The RED dashboard has not yet been built.
 
 ## Level 2.2.4–2.2.5 — Persistence and storage checkpoint
 

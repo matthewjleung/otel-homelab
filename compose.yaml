@@ -50,7 +50,15 @@
         - ./config/loki.yaml:/etc/loki/config.yaml:ro
         - loki-data:/loki
 
+    grafana:
+      image: grafana/grafana:13.2.2
+      ports:
+        - "127.0.0.1:3000:3000"
+      volumes:
+        - grafana-data:/var/lib/grafana
+ 
   volumes:
     prometheus-data:
     tempo-data:
     loki-data:
+    grafana-data:
