@@ -1,0 +1,85 @@
+apiVersion: 1
+groups:
+    - orgId: 1
+      name: homelab-alerts
+      folder: Homelab
+      interval: 30s
+      rules:
+        - uid: cfyibdcee5o8wc
+          title: High HTTP 5xx error rate
+          condition: C
+          data:
+            - refId: A
+              relativeTimeRange:
+                from: 600
+                to: 0
+              datasourceUid: afyhppnyueps0d
+              model:
+                editorMode: code
+                expr: |
+                    100 *
+                      (
+                        sum(
+                          rate(http_server_duration_milliseconds_count{
+                            job="otel-collector",
+                            exported_job="otel-homelab-api",
+                            http_target!="/health",
+                            http_status_code=~"5.."
+                          }[2m])
+                        )
+                        or
+                        0 * sum(
+                          rate(http_server_duration_milliseconds_count{
+                            job="otel-collector",
+                            exported_job="otel-homelab-api",
+                            http_target!="/health"
+                          }[2m])
+                        )
+                      )
+                      /
+                      sum(
+                        rate(http_server_duration_milliseconds_count{
+                          job="otel-collector",
+                          exported_job="otel-homelab-api",
+                          http_target!="/health"
+                        }[2m])
+                      )
+                instant: true
+                intervalMs: 1000
+                legendFormat: __auto
+                maxDataPoints: 43200
+                range: false
+                refId: A
+            - refId: C
+              queryType: expression
+              datasourceUid: __expr__
+              model:
+                conditions:
+                    - evaluator:
+                        params:
+                            - 1
+                        type: gt
+                      operator:
+                        type: and
+                      query:
+                        params:
+                            - C
+                      reducer:
+                        params: []
+                        type: last
+                      type: query
+                datasource:
+                    type: __expr__
+                    uid: __expr__
+                expression: A
+                intervalMs: 1000
+                maxDataPoints: 43200
+                refId: C
+                type: threshold
+          noDataState: OK
+          execErrState: Error
+          for: 1m
+          annotations:
+            description: Check Homelab RED. Find a failed request in Tempo and use its trace_id to locate the correlated Loki log. Check for active failure injection.
+            summary: API HTTP 5xx rate has exceeded 1% for at least one minute.
+          isPaused: false

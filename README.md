@@ -1,6 +1,189 @@
 # OpenTelemetry Homelab
 A small FastAPI application for learning Docker and OpenTelemetry.
 
+## Current state — Level 2 complete
+
+Six Docker Compose services provide a local observability platform: API,
+OpenTelemetry Collector, Prometheus, Tempo, Loki and Grafana. The system has
+queryable metrics, traces and application logs, one RED dashboard, one
+availability SLI/SLO, and one tested HTTP 5xx alert.
+
+Controlled failures were detected, investigated across signals, and followed
+by verified recovery. Level 2 is complete. Kubernetes is Level 3 and has not
+been started. Focused build hours were not tracked; no measured total is claimed.
+
+### Run the current deployment
+
+With Docker Desktop running, execute from the repository directory:
+
+```bash
+docker compose up -d
+docker compose ps
+curl -i http://localhost:8000/health
+```
+
+`up -d` creates/starts services in the background; `ps` shows their state;
+`curl -i` checks the API and includes response headers. The API should become
+healthy and return HTTP 200. A Mac Python virtual environment is not required
+to run the containers.
+
+| Service | Mac access | Container-to-container address |
+| --- | --- | --- |
+| API | http://localhost:8000 | api:8000 |
+| Collector | Not published | otel-collector:4318 (OTLP), :8889 (metrics) |
+| Prometheus | http://localhost:9090 | prometheus:9090 |
+| Tempo | http://localhost:3200 (API) | tempo:3200 (queries), :4318 (OTLP) |
+| Loki | http://localhost:3100 (API) | loki:3100 |
+| Grafana | http://localhost:3000 | grafana:3000 |
+
+Published ports bind to 127.0.0.1. All six containers share
+`otel-homelab_default`; service names, not fixed IP addresses, provide discovery.
+Grafana has a local login. Keep its password in a password manager, not Git.
+
+### Current telemetry architecture
+
+```text
+Mac client -> API:8000 -> OTLP/HTTP -> Collector:4318
+                                      |-- traces push -> Tempo:4318
+                                      |-- logs push   -> Loki:3100/otlp
+                                      `-- debug output -> Collector logs
+
+Prometheus -> scrape Collector:8889/metrics every 15s -> store returned samples
+Mac browser -> Grafana:3000 -> query Prometheus:9090, Tempo:3200 and Loki:3100
+```
+
+Configuration files are mounted read-only. Named volumes store backend data
+and Grafana settings; API code is built into its image. Backend persistence
+across container replacement was tested for Prometheus, Tempo and Loki.
+Grafana's volume is configured, but its persistence was not separately tested.
+
+## Level 2.4 — Availability and controlled incident
+
+### SLI and demonstration SLO
+
+- SLI: good recorded application requests / total recorded application requests.
+- Good: HTTP 200–499. Bad: HTTP 500–599. Exclude `/health` from both counts.
+- 4xx responses count as available service responses, not successful business
+  operations. This is a server-availability measure.
+- Window: rolling two minutes. SLO: availability at least **99%** in that window.
+- No requests: the ratio is undefined, not automatically 100%.
+- This short window is for a demonstration, not a production commitment or SLA.
+
+An SLI is the measurement, an SLO is its target, and an SLA is an external or
+business commitment. Application-side metrics cannot count requests that never
+reach the application; this measure does not establish end-to-end uptime.
+
+The following PromQL was tested in Grafana Explore, not added as another panel:
+
+```promql
+100 *
+(
+  sum(rate(http_server_duration_milliseconds_count{
+    job="otel-collector", exported_job="otel-homelab-api",
+    http_target!="/health", http_status_code=~"[234].."
+  }[2m]))
+  or
+  0 * sum(rate(http_server_duration_milliseconds_count{
+    job="otel-collector", exported_job="otel-homelab-api",
+    http_target!="/health"
+  }[2m]))
+)
+/
+sum(rate(http_server_duration_milliseconds_count{
+  job="otel-collector", exported_job="otel-homelab-api",
+  http_target!="/health"
+}[2m]))
+```
+
+`rate` estimates counter growth per second and handles counter resets. The ratio
+of these rates estimates the request-based availability percentage. The fallback
+supplies zero good requests when only bad-request series exist; it does not
+turn absent traffic into success. For the tested 200/503 traffic, availability
+equals 100 minus the RED error percentage.
+
+### One Grafana-managed alert
+
+| Setting | Validated configuration |
+| --- | --- |
+| Name | High HTTP 5xx error rate |
+| Folder / group | Homelab / homelab-alerts |
+| Query | Instant Prometheus query: 5xx rate / total rate × 100, excluding `/health`, over 2m |
+| Condition | Error percentage strictly greater than 1 |
+| Evaluation interval | 30 seconds |
+| Pending period | 1 minute of sustained threshold breach |
+| Keep firing for | 0 seconds |
+| No data | Normal (`OK` in the export) |
+| Query error / timeout | Error |
+| Notifications | Default policy preview routed to an empty contact point; no external integration |
+
+The rule is actionable because it identifies sustained server-side request
+failures. Investigation uses Homelab RED, a failed Tempo span, and its correlated
+Loki log. Grafana checks the rule independently of dashboard refreshes. The
+15-second Prometheus scrape interval and 30-second rule interval add detection
+delay; the one-minute pending period is an intentional noise-reduction choice.
+
+No-data handling suppresses idle-lab alerts; Normal alone does not prove health.
+NaN from 0/0 is not a measured 0% error rate. Recovery was verified with successful
+traffic and a numeric 0% error rate, not merely silence. This rule does not reliably
+detect a stopped API or cover every telemetry outage.
+
+### Incident evidence — 18 September 2026
+
+1. Healthy `/hello` traffic returned HTTP 200, with 0% errors and a Normal/OK alert.
+2. Repeated `/simulate?fail=true` requests returned HTTP 503. The error percentage
+   rose and the alert was observed Firing. For this test traffic, the elevated
+   error percentage also meant availability fell below the 99% target.
+3. Investigation selected trace `68eda52dfdd2f9872e2889adf70b1293`, starting at
+   12:53:15.360 Australia/Sydney. Its `/simulate` server span returned HTTP 503 in
+   3.71 ms. The matching WARN log said `Simulated failure after 0 ms`.
+4. Failure injection stopped. Approximately three minutes of healthy `/hello`
+   traffic returned HTTP 200; errors fell to 0% and the alert returned to Normal/OK.
+
+This incident demonstrated a fast failure; the earlier Level 2.3 investigation
+demonstrated a slow failure. No production incident or external notification
+delivery is claimed.
+
+To reproduce, first run healthy traffic, then failing traffic, then healthy traffic
+again. Run each phase separately, watching Grafana while it runs. For each phase,
+set `TEST_URL` in the same terminal: use `http://localhost:8000/hello` for baseline
+and recovery, and `http://localhost:8000/simulate?fail=true` for failure injection.
+
+```bash
+TEST_URL='http://localhost:8000/hello'
+for i in {1..180}; do
+  curl -sS -o /dev/null -w '%{http_code}\n' "$TEST_URL"
+  sleep 1
+done
+```
+
+The loop prints HTTP statuses and pauses one second after each request. Control+C
+stops it. Do not copy shell `$` or `>` prompts into commands. Allow scrape and
+evaluation delays, and keep the Grafana time range on the test interval.
+
+### Alert export and restoration limits
+
+`alerts/high-http-5xx.yaml` is the actual Grafana file-provisioning export of the
+tested rule. It is a version-controlled reference, **not automatically loaded by
+Compose**, and is not dashboard-import JSON. The live rule remains UI-managed in
+Grafana's database on `grafana-data`.
+
+The export references the current Prometheus data-source UID `afyhppnyueps0d`.
+On a fresh Grafana instance, recreate the data source and rule through the UI
+using the settings and expression in the export. If using file provisioning in
+the future, map that UID to the destination data source first. Notification
+policies/contact points are not included in this rule export. Restoration of the
+rule export has not been tested; automated provisioning is deferred.
+
+## Future Enhancements — not implemented
+
+Level 2 stops here. Kubernetes is the next project phase, Level 3, and requires
+an explicit start. Production security, availability, backup/retention design,
+external notifications and more advanced SLO tooling remain future work.
+No additional services, alerts or dashboards were added to pursue completeness.
+
+The sections below record earlier checkpoints. The final section preserves the
+Level 1 deployment instructions as historical reference, not current run commands.
+
 ## Level 2.3 — Grafana setup and data sources
 
   Grafana runs through Compose at http://localhost:3000.
@@ -156,7 +339,8 @@ A small FastAPI application for learning Docker and OpenTelemetry.
 
 ## Level 2.1 — Docker Compose
 
-  The API and OpenTelemetry Collector are now managed through `compose.yaml`.
+  At the 2.1 checkpoint, the API and Collector moved into `compose.yaml`.
+  The current Compose file also includes the four backend/UI services.
   Use the Compose commands below for the current deployment. The manual Docker
   instructions later in this document describe the Level 1 setup.
 
@@ -175,20 +359,30 @@ A small FastAPI application for learning Docker and OpenTelemetry.
   appear in Collector output.
 
   Compose creates a shared network. The API exports OTLP/HTTP telemetry to
-  http://otel-collector:4318 using service-name discovery. Only API port 8000
-  is published to the Mac, on 127.0.0.1.
+  http://otel-collector:4318 using service-name discovery. At this checkpoint,
+  only API port 8000 was published to the Mac, on 127.0.0.1. The current port
+  mappings are listed at the top of this README.
 
   The API health check calls /health inside its container every 30 seconds.
   It checks API responsiveness, not telemetry delivery, and does not
   automatically restart an unhealthy container.
 
-  The Collector still uses the detailed debug exporter. Metrics are now stored in Prometheus.
-  Traces and logs are next. The original Level 1 containers remain stopped;
+  The Collector still uses the detailed debug exporter alongside backend exporters.
+  The original Level 1 containers were left stopped during the Compose migration;
   do not start the old API alongside Compose because both use host port 8000.
 
 
 
-## Current state
+## Historical reference — Level 1
+
+The remainder records the completed Level 1 setup. Its manual `docker run`,
+`docker start` and `docker logs otel-api` commands refer to the old containers
+and `otel-net`, not the running Compose deployment. Do not run the old API
+alongside Compose: both publish Mac port 8000. The Collector configuration has
+since gained backend exporters, so these historical commands alone no longer
+reproduce the current system. Use the Compose instructions above for Level 2.
+
+### Level 1 state at completion
 
 The containerised FastAPI API exports traces, metrics, and logs over
 OTLP HTTP to an OpenTelemetry Collector.
@@ -588,3 +782,4 @@ api -->|HTTP response| port
 port --> client
 api --> appLogs["Console handler<br/>API container logs"]
 
+```

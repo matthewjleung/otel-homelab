@@ -3,6 +3,10 @@
 This document records how the OpenTelemetry homelab was built and what each
 step demonstrated. It is an interview study source as well as a project log.
 
+Sections 1–14 and their architecture/limitations describe the Level 1 snapshot.
+The Level 2 completion record is appended below; it supersedes those historical
+limitations without removing the original learning record.
+
 ## 1. Establish the baseline API
 
 The project began as a small FastAPI application running locally with Python
@@ -229,3 +233,149 @@ and telemetry path are separate.
 The current Collector only prints telemetry. It has no durable backend,
 query interface, dashboard, alerting, authentication, TLS, or Kubernetes
 deployment.
+
+## Level 2 — Completed 18 September 2026
+
+Level 2 extended the existing application into a six-container observability
+platform. Work proceeded in tutor mode: the learner edited configurations,
+ran commands, interpreted evidence and committed checkpoints. No application
+redesign, Kubernetes, additional microservices or custom metrics were required.
+The 12–16 focused-hour budget guided scope, but focused hours were not tracked.
+
+### 2.1 — Declarative container management
+
+Replaced manual management with Compose services for the API and Collector.
+Service-name discovery preserved OTLP/HTTP delivery over the Compose network.
+A Python-based API health check verified responsiveness inside the container.
+It did not test telemetry delivery or automatically restart unhealthy containers.
+Existing traces, metrics and correlated application logs were validated after
+the migration; the original Level 1 containers were left stopped.
+
+### 2.2 — Queryable storage, one signal at a time
+
+- Prometheus scraped the Collector's application metrics endpoint on port 8889
+  every 15 seconds. The API continued pushing OTLP metrics to the Collector
+  every five seconds. Request counts and rates were queried with route/status
+  labels using existing instrumentation.
+- Tempo received traces through `otlp_http/tempo` on port 4318. Its query API on
+  port 3200 retrieved healthy, slow and failed requests by trace ID.
+- Loki received existing application OTLP logs through `otlp_http/loki`, whose
+  base endpoint is `http://loki:3100/otlp`. Normal and failed logs were queried
+  through its API. `service.name` became the indexed `service_name` label;
+  trace IDs remained structured metadata rather than high-cardinality labels.
+- The detailed debug exporter remained available for diagnosis. No separate
+  container-log collection agent was added.
+
+Named volumes were added for all three backends. Historical data was queried,
+all five then-existing Compose containers were removed with
+`docker compose down --timeout 60`, and replacements were started. Volumes were
+not deleted. Prometheus retained count 4 at timestamp 1789573980; Tempo and Loki
+retained trace/log evidence for `55556666777788889999aaaabbbbcccc`.
+This demonstrated container-replacement persistence, not backup or lossless
+telemetry handling under every failure. Startup readiness briefly returned 503
+for Tempo/Loki, then succeeded without configuration changes.
+
+### 2.3 — Grafana, RED and cross-signal investigation
+
+Grafana became the sixth service, with `grafana-data` mounted at
+`/var/lib/grafana`. Data sources were configured manually against Compose
+service query addresses and tested with actual telemetry in Explore. The volume
+preserves Grafana state by design; a separate Grafana recreation test was not run.
+
+Built exactly one dashboard, Homelab RED, with three panels:
+
+- Request rate, in requests per second.
+- HTTP 5xx error percentage.
+- Estimated P95 latency, in milliseconds.
+
+All panels excluded `/health` and used two-minute rate windows. Simple curl
+loops exercised healthy, failed, slow and slow-failed traffic. Histogram bucket
+interpolation explained an approximately 988 ms P95 estimate for requests with
+a 750 ms injected delay. It was not evidence that every trace lasted 988 ms.
+No traffic produced undefined ratios/percentiles, distinct from a healthy zero.
+
+Investigation followed dashboard degradation to trace
+`9dfc2ae775afec75b2ddc7c973b1da99`: HTTP 503, 762.3 ms, and a correlated WARN log
+`Simulated failure after 750 ms`. Navigation was manual through time windows
+and trace IDs, not automatic metric exemplars or configured cross-signal links.
+
+The tested dashboard was exported as portable Classic JSON to
+`dashboards/homelab-red.json`, with a Prometheus data-source input for import.
+The initial V2 export had local data-source references; re-exporting corrected
+portability without changing the live dashboard or adding provisioning.
+
+### 2.4 — One SLI, one SLO, one alert, one incident
+
+Defined request-based availability as recorded HTTP 200–499 responses divided
+by total recorded application responses, excluding `/health`, over two minutes.
+4xx responses were accepted for this server-availability definition, not as
+proof of business success. No traffic was undefined. Requests that never reach
+the application are outside this measurement's coverage.
+
+The demonstration SLO was at least 99% availability over that same rolling
+two-minute window. This was intentionally short for testing, not a production
+SLO or external SLA. The SLI query was tested in Explore without adding a panel.
+
+Created one Grafana-managed rule, High HTTP 5xx error rate:
+
+- Instant query for 5xx percentage using the existing metrics and 2m window.
+- Threshold strictly above 1%, evaluated every 30s, pending for 1m.
+- No additional recovery hold; no data mapped to Normal, query errors to Error.
+- Rule active in Homelab / homelab-alerts.
+- Default routing preview selected an empty contact point; no external
+  notification integration was configured or tested.
+
+The planned 15s evaluation interval was changed to 30s during setup. Collection
+interval, query window, dashboard refresh, evaluation interval and pending
+period were explained as separate concepts. A NaN preview from idle traffic was
+distinguished from a numeric 0% error result after healthy requests.
+
+The controlled incident on 18 September 2026 demonstrated:
+
+1. Healthy HTTP 200 traffic, 0% error rate and Normal/OK alert state.
+2. Sustained intentional HTTP 503 traffic and an observed Firing alert.
+3. Investigation of trace `68eda52dfdd2f9872e2889adf70b1293`, starting at
+   12:53:15.360 Australia/Sydney: `/simulate`, HTTP 503, duration 3.71 ms.
+4. Loki returned the matching WARN message `Simulated failure after 0 ms`.
+5. Failure injection stopped; healthy traffic returned HTTP 200, the measured
+   error percentage reached 0%, and the alert returned to Normal/OK.
+
+For this 200/503 traffic, availability was the complement of error percentage:
+the failures violated the 99% demonstration target and successful traffic
+restored it as failures aged out. Normal from absent traffic alone was not
+accepted as recovery. Exact alert firing/resolution timestamps were not recorded.
+
+Exported the actual rule to `alerts/high-http-5xx.yaml` for version control.
+This file-provisioning export is not loaded by Compose and still references the
+original Prometheus data-source UID. A fresh deployment needs that reference
+mapped or the rule recreated through the UI. Export restoration was not tested.
+
+### Troubleshooting and engineering habits
+
+- YAML nesting errors were diagnosed from Compose validation and numbered file
+  output. Cosmetic trailing spaces were subsequently deprioritised.
+- Empty shell URL variables caused curl errors before any API request was sent;
+  printing the variable and testing one request isolated the cause.
+- Copied shell `>` prompts and broken multiline quoting caused shell/PromQL
+  errors. Control+C cancelled unfinished commands; shorter commands reduced
+  copy/paste mistakes. These were not failures of the telemetry backends.
+- Grafana state, health, and query value were distinguished: a firing alert can
+  have OK health, while Normal alone can result from no traffic.
+- Git checkpoints used scoped staging and review. An earlier rejected push was
+  resolved by fetching, inspecting divergence, preserving local edits in a
+  scoped stash, and rebasing before a normal push. No force push was needed.
+- UI-created settings live in Grafana's volume, not automatically in Git.
+  Exported configuration preserves definitions, not historical telemetry data.
+
+### Finish condition and remaining limits
+
+All Level 2 functional criteria were demonstrated: Compose, three stored and
+queryable signals, Grafana, RED, one SLI/SLO, one firing/resolving alert, controlled
+failure injection and cross-signal investigation. README and this history were
+updated at the final checkpoint.
+
+This remains a single-host learning platform. It has no production HA, backup
+strategy, TLS architecture, notification delivery, end-to-end uptime guarantee
+or advanced error-budget tooling. One dashboard and one alert were sufficient.
+Level 2 stops here. Kubernetes is explicitly deferred to Level 3; it has not
+been started automatically.
